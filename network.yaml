@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Udacity Cloud DevOps IaC final Project Network
+
+Parameters:
+  EnvironmentName:
+    Description: The project name
+    Type: String
+
+  VpcCidr:
+    Description: Cidr for the main  VPC
+    Type: String
+
+  PubSubnet1Cidr:
+    Description: Cidr for the PubSubnet1
+    Type: String
+
+  PriSubnet1Cidr:
+    Description: Cidr for the PriSubnet1
+    Type: String
+
+  PubSubnet2Cidr:
+    Description: Cidr for the PubSubnet2
+    Type: String
+
+  PriSubnet2Cidr:
+    Description: Cidr for the PriSubnet2
+    Type: String
+
+Resources:
+  # VPC
+  MainVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      Tags:
+        - Key: Name
+          Value: The Main Vpc
+
+  # IG
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MainVpc's Internet Gateway
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref MainVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # Subnet 1
+  PubSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref MainVpc
+      CidrBlock: !Ref PubSubnet1Cidr
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Public Subnet 1
+
+  PriSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      VpcId: !Ref MainVpc
+      CidrBlock: !Ref PriSubnet1Cidr
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: Private Subnet 1
+
+  # Subnet 2
+  PubSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      VpcId: !Ref MainVpc
+      CidrBlock: !Ref PubSubnet2Cidr
+      Tags:
+        - Key: Name
+          Value: Public Subnet 2
+
+  PriSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      VpcId: !Ref MainVpc
+      CidrBlock: !Ref PriSubnet2Cidr
+      Tags:
+        - Key: Name
+          Value: Private Subnet 2
+
+  # NATs and EIPs
+  EIP1:
+    Type: AWS::EC2::EIP
+
+  EIP2:
+    Type: AWS::EC2::EIP
+
+  NAT1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PubSubnet1
+      AllocationId: !GetAtt EIP1.AllocationId
+
+  NAT2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PubSubnet2
+      AllocationId: !GetAtt EIP2.AllocationId
+
+  # Public Routes
+  PubRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVpc
+      Tags:
+        - Key: Name
+          Value: Public route table
+
+  PubSubnet1RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet1
+      RouteTableId: !Ref PubRouteTable
+
+  PubSubnet2RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PubSubnet2
+      RouteTableId: !Ref PubRouteTable
+
+  PublicInternetRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PubRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # Private Routes
+  PriRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVpc
+      Tags:
+        - Key: Name
+          Value: Private Route Table 1
+
+  PriRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MainVpc
+      Tags:
+        - Key: Name
+          Value: Private Route Table 2
+
+  PriSubnet1RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PriSubnet1
+      RouteTableId: !Ref PriRouteTable1
+
+  PriSubnet2RTAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PriSubnet2
+      RouteTableId: !Ref PriRouteTable2
+
+  PriInternetRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PriRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NAT1
+
+  PriInternetRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PriRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NAT2
+
+Outputs:
+  MainVpc:
+    Description: VPC id
+    Value: !Ref MainVpc
+    Export:
+      Name: VpcId
+
+  PubSubnet1:
+    Description: Public Subnet 1 id
+    Value: !Ref PubSubnet1
+    Export:
+      Name: PubSubnet1Id
+
+  PriSubnet1:
+    Description: Private Subnet 1 id
+    Value: !Ref PriSubnet1
+    Export:
+      Name: PriSubnet1Id
+
+  PubSubnet2:
+    Description: Public Subnet 2 id
+    Value: !Ref PubSubnet2
+    Export:
+      Name: PubSubnet2Id
+
+  PriSubnet2:
+    Description: Private Subnet 2 id
+    Value: !Ref PriSubnet2
+    Export:
+      Name: PriSubnet2Id

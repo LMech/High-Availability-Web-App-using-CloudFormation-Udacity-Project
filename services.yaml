@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: Udacity Cloud DevOps IaC final Project Services
+
+Parameters:
+  EnvironmentName:
+    Description: The project name
+    Type: String
+
+  JumpBoxInstanceType:
+    Description: EC2 instance type for the jump box
+    Type: String
+
+  WebAppInstanceType:
+    Description: EC2 instance type fot the web application
+    Type: String
+
+  ImageAMI:
+    Description: The AMI for the required Image
+    Type: String
+
+Resources:
+  # Security Groups
+  LoadBalancerSecGrp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: LoadBalancerSecGrp
+      GroupDescription: Allow HTTP only to the load balancer
+      VpcId: !ImportValue VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  JumpBoxSecGrp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: JumpBoxSecGrp
+      GroupDescription: Allow ssh as ingress and all the ports as egress
+      VpcId: !ImportValue VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  WebAppSecGrp:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WebAppSecGrp
+      GroupDescription: Allow http and ssh as ingress and all the ports as egress
+      VpcId: !ImportValue VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  # JumpBox
+  JumpBoxInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref ImageAMI
+      InstanceType: !Ref JumpBoxInstanceType
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          AssociatePublicIpAddress: true
+          GroupSet:
+            - !Ref JumpBoxSecGrp
+          SubnetId: !ImportValue PubSubnet1Id
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: 10
+
+  # WebApplication
+  WebAppLanConf:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      LaunchConfigurationName: WebAppLanConf
+      IamInstanceProfile: !ImportValue ProfileInstance
+      ImageId: !Ref ImageAMI
+      InstanceType: !Ref WebAppInstanceType
+      SecurityGroups:
+        - !Ref WebAppSecGrp
+      UserData: !Base64 |
+        #!/bin/bash
+        apt-get update -y
+        apt-get install apache2 -y
+        systemctl start apache2.service
+        cd /var/www/html
+        echo "Udacity Demo Web Server Up and Running!" > index.html
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: 10
+
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 5
+      VpcId: !ImportValue VpcId
+
+  WebApplicationAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - !ImportValue PriSubnet1Id
+        - !ImportValue PriSubnet2Id
+      LaunchConfigurationName: !Ref WebAppLanConf
+      MinSize: "2"
+      MaxSize: "3"
+      TargetGroupARNs:
+        - !Ref WebAppTargetGroup
+
+  # Load Balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      SecurityGroups:
+        - !Ref LoadBalancerSecGrp
+      Subnets:
+        - !ImportValue PubSubnet1Id
+        - !ImportValue PubSubnet2Id
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebAppTargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref WebAppTargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values: [/]
+      ListenerArn: !Ref Listener
+      Priority: 1
+
+Outputs:
+  LoadBalancer:
+    Value: !Join ["", ["http://", !GetAtt LoadBalancer.DNSName]]
+    Export:
+      Name: LoadBalancerURL
